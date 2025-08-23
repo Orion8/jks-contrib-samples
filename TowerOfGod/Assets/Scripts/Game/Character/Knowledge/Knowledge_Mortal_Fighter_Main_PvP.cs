@@ -1,0 +1,509 @@
+﻿using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+using CodeStage.AntiCheat.ObscuredTypes;
+
+public class Knowledge_Mortal_Fighter_Main_PvP : Knowledge_Mortal_Fighter_Main
+{
+	void Awake()
+	{
+		Random.seed = 39;
+	}
+
+	protected override void initializeBeforeUpdateBegin()
+	{
+		_cur_hp = _max_hp;		
+		findWeaponBones();
+		//InvokeRepeating("bossBorderLine", 1, 0.05f);//0.25f);
+
+
+		//jks AnimCon.setAnimatorCullingMode(AnimatorCullingMode.AlwaysAnimate);
+		StartCoroutine(co_setAnimatorCullingMode());
+	}
+
+	// in pvp, class matching is not used.
+	public override bool IsClassMatching
+	{
+		get { return false; }
+	}
+
+	
+	public override bool IsBattleTimeStarted
+	{ 
+		get { return true; }
+	}
+	
+
+	public override void setAttributesFromTable(Table_Skill tbl)
+	{
+		base.setAttributesFromTable(tbl);
+		
+		//jks override attack distance for pvp long distance attack to prevent to clamp distance range
+		_attackDistanceMin = 0;   
+
+		if (_attackDistanceMax > 3)
+		_attackDistanceMax = 3;  
+	}
+
+
+
+	IEnumerator co_setAnimatorCullingMode()
+	{
+		while(AnimCon == null)
+		{
+			yield return null;
+		}
+		AnimCon.setAnimatorCullingMode(AnimatorCullingMode.AlwaysAnimate);
+	}
+
+	public override void startCoolTimer()
+	{
+//		forceResetFlags();
+//		Action_WalkBack = true;
+	}
+
+
+	protected override float GetRandomNumberForHitType()
+	{
+		return Utility.GetRandom_0_1();
+	}
+
+
+	public override void updateHP(ObscuredInt damage, eHitType hitType)
+	{
+		int deltaDamage = damage; //jks to decrease total sinsu as much as individual card sinsu decrement.
+		if (Current_HP < -damage)
+		{
+			deltaDamage = -Current_HP;
+		}
+
+		base.updateHP(deltaDamage,hitType);
+
+		BattleBase.Instance.updateTotalHP(deltaDamage, AllyID);
+
+
+		if (Inventory.Instance() != null)
+		{
+			if (AllyID == eAllyID.Ally_Human_Me)
+			{
+				Inventory.Instance().CSlot[_cardDeckIndex].Now_HP = Current_HP;
+			}
+			else
+			{
+				PvpBattleUI.Instance().TargetUser.CSlot[_cardDeckIndex].Now_HP = Current_HP;
+			}
+		}
+
+		if (PvpBattleUI.Instance() && IsDead)
+			PvpBattleUI.Instance().setDeadCard(AllyID == eAllyID.Ally_Human_Me, _cardDeckIndex);
+	}
+
+
+
+	public override void forceResetFlags()
+	{
+		base.forceResetFlags();
+
+		Action_Idle = true; //jks default
+	}
+	
+
+	public override void resetActionInfo()
+	{
+		if (Action_Hit) 
+		{
+			forceResetFlags();
+			Action_Idle = true;
+			
+			return;//jks do nothing after hit in PVP
+		}
+		
+		forceResetFlags();
+
+		//jks after victory action, goto postVictory for "idle" animation
+		if ((IsBattleVictorious && AllyID == eAllyID.Ally_Human_Me) ||
+		    (IsBattleFailed && AllyID != eAllyID.Ally_Human_Me))
+		{
+			Action_PostVictory = true;
+		}
+		
+		doNextAction();
+	}
+
+
+	protected override void doNextAction()
+	{
+		
+		setNextComboActionFlag();
+
+		
+		//		if (IsLeader)
+		//			Log.jprint(gameObject + "   doNextAction  c1: " + Action_Combo1 + " c2: " + Action_Combo2 + " c3: " + Action_Combo3 + " c4: " + Action_Combo4 + " c5: " + Action_Combo5 + " c6: " + Action_Combo6);
+		
+		if (NoNextComboAction) //jks if no next action,
+		{
+
+			processOnUseCardEnd();
+
+			if (ComboRecent != 0) //jks if skill ever initiated?
+			{
+				//				startCoolTimer();
+				ComboRecent = 0;
+				ComboCurrent = 0;
+				//Log.jprint(gameObject + " C O O L T I M E  S T A R T : " + CardDeckIndex);	
+			}
+		}
+		
+	}
+	
+	public override void processOnUseCardEnd()
+	{
+		if(ComboCurrent == TotalCombo) 
+			activateSkillFinishedEvent();
+	}
+
+	//jks 상대가 뒤로 물러나는 경우면 좀더 앞으로 다가가서 공격 시작하게 함.
+//	protected float adjustAttackDistanceByTargetMovement(GameObject target)
+//	{
+//		float result = _attackDistanceMax;
+//
+//		if (target.GetComponent<Knowledge_Mortal_Fighter_Main>().Action_WalkBack)
+//			result -= _attackDistanceMax * 0.7f;  //jks use 30% of its original distance.
+//
+//		return result;
+//	}
+
+
+//	public override void showWeapon(bool bShow)  //jks in pvp, always show
+//	{
+//		setWeaponVisibility(true);
+//	}
+
+
+	protected override void pushPassedOpponents()
+	{
+		//jks do for 1 vs 1 
+		GameObject curTarget = getCurrentTarget();
+		if (curTarget == null) return;
+
+
+		if (transform.forward.x > 0)
+		{
+			if (transform.position.x > curTarget.transform.position.x) //jks passed
+			{
+				keepOpponentAtWeaponEnd(curTarget, 0.3f);
+			}
+		}
+		else
+		{
+			if (transform.position.x < curTarget.transform.position.x) //jks passed
+			{
+				keepOpponentAtWeaponEnd(curTarget, 0.3f);
+			}
+		}
+
+	}
+
+
+	protected override void pushPassedOpponentsWhenIMove()
+	{
+		GameObject curTarget = getCurrentTarget();
+		if (curTarget == null) return;
+		if (IsDead) return;
+
+
+		if (transform.forward.x > 0)
+		{
+			if (transform.position.x > curTarget.transform.position.x) //jks passed
+			{
+				keepOpponentAtShellEnd(curTarget, 0.3f);
+			}
+		}
+		else
+		{
+			if (transform.position.x < curTarget.transform.position.x) //jks passed
+			{
+				keepOpponentAtShellEnd(curTarget, 0.3f);
+			}
+		}
+
+	}
+
+
+
+	//jks for scan
+	public override bool getOpponentsInScanDistance(bool bQuickSkill)
+	{
+		
+		
+		if (_pvp_target == null)
+		{
+			//showWeapon(false);
+			//jks zoom out if no enemy.
+			if (CameraManager.Instance.doIHaveCameraAttached(transform))
+				setZoomOutState(true);//jks if no enemy. request zoom out.
+			
+			return false;
+		}
+		
+		GameObject closestOpponent = _pvp_target;
+		setTarget(closestOpponent);
+		
+		Knowledge_Mortal opponentKnowledge = closestOpponent.GetComponent<Knowledge_Mortal>();
+		float distShell_AttackerAndClosestOpponent = Mathf.Abs(transform.position.x - closestOpponent.transform.position.x) - this.Radius - opponentKnowledge.Radius;
+		
+		//_isTargetInShowWeaponRange = !IsPvpVictim;// && (distShell_AttackerAndClosestOpponent < _attackDistanceMax + 4); //jks too show weapon if target is closer than 3 meter.
+		//showWeapon(_isTargetInShowWeaponRange);
+		
+		//if (adjustAttackDistanceByTargetMovement( closestOpponent ) < distShell_AttackerAndClosestOpponent)
+		if (_attackDistanceMax < distShell_AttackerAndClosestOpponent)
+		{
+			//jks zoom out if no enemy.
+			if (CameraManager.Instance.doIHaveCameraAttached(transform))
+				setZoomOutState(true);//jks if no enemy. request zoom out.
+			
+			return false;
+		}
+		
+		//		if (gameObject.name.Contains("C"))
+		//		{
+		//			Log.jprint("________  "+ transform.position.x + " : " + WeaponEndPosition.x + " : " + closestOpponent.transform.position.x);
+		//			Log.jprint(Time.time + ": " + gameObject + " found as closest: " + closestOpponent + " __________ " + "distShell_AttackerAndClosestOpponent: " + distShell_AttackerAndClosestOpponent + " < " + _attackDistanceMax); 
+		//		}
+		
+		if (CameraManager.Instance.doIHaveCameraAttached(transform))
+			setZoomOutState(false);//jks found enemy. request zoom in.
+		
+		
+		return true;
+	}
+
+	// for give damage
+	public override GameObject getOpponentsInScanDistance_WeaponPositionBased()
+	{
+		if (_pvp_target == null) //jks in PVP, target to attack is already decided.
+		{
+			//showWeapon(false);
+			//jks zoom out if no enemy.
+			if (CameraManager.Instance.doIHaveCameraAttached(transform))
+				setZoomOutState(true);//jks if no enemy. request zoom out.
+			
+			return null;
+		}
+		
+		GameObject closestOpponent = _pvp_target;
+		setTarget(closestOpponent);
+
+		Knowledge_Mortal opponentKnowledge = closestOpponent.GetComponent<Knowledge_Mortal>();
+		
+		//jks - body based
+		float distShell_AttackerAndClosestOpponent = Mathf.Abs(transform.position.x - closestOpponent.transform.position.x) - this.Radius - opponentKnowledge.Radius;
+		
+		//jks - weapon based
+		float distWeapon_AttackerAndClosestOpponent = Mathf.Abs(WeaponEndPosition.x  - closestOpponent.transform.position.x) - opponentKnowledge.Radius;
+		
+		//jks 무기를 뒤로 휘두르는 경우 몸보다 더 뒤에 위치하기 때문에  이 경우는 몸 위치로 계산. 
+		float finalDistToCheck = Mathf.Min(distShell_AttackerAndClosestOpponent, distWeapon_AttackerAndClosestOpponent);
+		
+		//		if (gameObject.name.Contains("C"))
+		//		{
+		//			Log.jprint("+++++++++  "+ transform.position.x + " : " + WeaponEndPosition.x + " : " + closestOpponent.transform.position.x);
+		//			Log.jprint(Time.time + ": " + gameObject + " found as closest: " + closestOpponent + " ++++++++++++ " + "finalDistToCheck: " + finalDistToCheck + " < ? " + _attackDistanceMax); 
+		//		}
+		
+		if (_attackDistanceMax + _weaponLength < finalDistToCheck) 
+		{
+			//jks zoom out if no enemy.
+			if (CameraManager.Instance.doIHaveCameraAttached(transform))
+				setZoomOutState(true);//jks if no enemy. request zoom out.
+			
+			return null;
+		}
+
+		
+		if (CameraManager.Instance.doIHaveCameraAttached(transform))
+			setZoomOutState(false);//jks found enemy. request zoom in.
+
+		return closestOpponent;
+	}
+
+
+
+	public override void giveDamage(float reactionDistanceOverride)
+	{		
+		if (CameraManager.Instance == null) return;
+		
+		//Log.jprint(Time.time+": "+ gameObject + ". . . . . giveDamage(): ");
+		_skillCompleted = isLastDamageInSkill(reactionDistanceOverride);
+
+		
+		//GameObject closestOpponent = getOpponentsInScanDistance_WeaponPositionBased(10 ,"Fighters", _opponentsInAttackRange);
+		//if (closestOpponent == null) return;
+
+		if (_pvp_target == null) return;
+		
+		GameObject closestOpponent = _pvp_target;
+		
+		setTarget(closestOpponent);
+
+		
+		//Knowledge_Mortal opponentKnowledge = closestOpponent.GetComponent<Knowledge_Mortal>();
+		
+		
+		//jks - body based
+		//float distShell_AttackerAndClosestOpponent = Mathf.Abs(transform.position.x - closestOpponent.transform.position.x) - this.Radius - opponentKnowledge.Radius;
+		
+		//jks - weapon based
+		//float distWeapon_AttackerAndClosestOpponent = Mathf.Abs(WeaponEndPosition.x  - closestOpponent.transform.position.x) - opponentKnowledge.Radius;
+		
+		//jks 무기를 뒤로 휘두르는 경우 몸보다 더 뒤에 위치하기 때문에  이 경우는 몸 위치로 계산. 
+		//float finalDistToCheck = Mathf.Min(distShell_AttackerAndClosestOpponent, distWeapon_AttackerAndClosestOpponent);
+
+		
+		//jks - 공격 중 적에게 최대공격가능거리보다 가까워지면, 가까워진 거리를 와 damage range를 기준으로 공격 받을 적 판단하기위한 값.
+		//float damageDistance = Mathf.Min(_attackDistanceMax, finalDistToCheck) + _damageRange;
+
+		{
+
+			//jks - body based
+			//distShell_AttackerAndClosestOpponent = Mathf.Abs(transform.position.x - closestOpponent.transform.position.x) - this.Radius - opponentKnowledge.Radius;
+			//jks - weapon based
+			//distWeapon_AttackerAndClosestOpponent = Mathf.Abs(WeaponEndPosition.x  - closestOpponent.transform.position.x) - opponentKnowledge.Radius;
+			//jks 무기를 뒤로 휘두르는 경우 몸보다 더 뒤에 위치하기 때문에  이 경우는 몸 위치로 계산. 
+			//finalDistToCheck = Mathf.Min(distShell_AttackerAndClosestOpponent, distWeapon_AttackerAndClosestOpponent);
+
+
+//			Log.jprint(closestOpponent + "***    distShell_AttackerAndClosestOpponent: " + distShell_AttackerAndClosestOpponent);
+//			Log.jprint(closestOpponent + "***    _attackDistanceMax: " + _attackDistanceMax + " < _damageRange: " + _damageRange);
+//			Log.jprint(closestOpponent + "***    distShell: " + distShell + " < damageDistance: " + damageDistance);
+
+			//if (finalDistToCheck > damageDistance + _weaponLength)  //jks for the current target, give generous(+ weapon length) check
+			//	return;
+
+			Knowledge_Mortal_Fighter knowledgeOpponent = closestOpponent.GetComponent<Knowledge_Mortal_Fighter>();
+			
+			eHitType hitType = getFinalHitType(knowledgeOpponent);
+			
+			int hitReactionAnimID = getReaction(hitType);
+			ObscuredInt classRelationAttackPoint = calculate_ClassRelation_AttackPoint(AttackPoint, knowledgeOpponent);
+
+			ObscuredInt finalAttack = AttackPoint + classRelationAttackPoint;
+
+			#if UNITY_EDITOR
+			if (TestOption.Instance() != null && TestOption.Instance()._showDamageCalculation)
+			{
+				Log.print_always("   --------------------------------- PVP ---------------------------------");
+				Log.print_always("   현재 리더 클래스: None ");
+				Log.print_always("   공격자 : " + gameObject + "  -->  피해자: " + knowledgeOpponent);
+				Log.print_always("   공격자 클래스 : " + Class + "  -->  피해자 클래스: " + knowledgeOpponent.Class + "   피격 타입: " + hitType);
+				Log.print_always("   G I V E  D A M A G E      Original: "+ AttackPoint + "    + 클래스 상성 공격력: "+classRelationAttackPoint+" = " + finalAttack);
+				Log.print_always("   PVP 카드숫자 우위 공격치 배수: " + PvpAttackBoost + "  x  "+ finalAttack + "  =  " + (PvpAttackBoost * finalAttack));
+
+			}
+			#endif 
+
+			finalAttack *= PvpAttackBoost;
+
+			BattleBase.Instance.incrementHitTypeCount(CardDeckIndex, hitType);
+
+			//임의 공격력 부스트
+			finalAttack *= 4;
+
+			knowledgeOpponent.takeDamage(finalAttack, hitReactionAnimID, hitType, AttackType, _weaponType_ForAnimation, gameObject, reactionDistanceOverride);
+		}
+	}
+
+
+//	protected override void updateDamageUI(Transform transform, ObscuredInt damagePoint, eHitType hitType)
+//	{
+//		//Log.jprint(gameObject + "hitType : " + hitType);
+//		if (PvpBattleUI.Instance() != null)
+//			PvpBattleUI.Instance().addDemageUI(transform, damagePoint, hitType);
+//	}
+
+
+
+	public override int animHitReaction() 
+	{ 
+		//Log.jprint(Time.time +" : "+ gameObject + " ? ? ? ? ? ? ? animHitReaction() : " + _animHitNumber);
+		
+		if (IsLastDamageInSkill)
+			return getAnimHash("Reaction4");
+		else if (Loco.ReactionAnimID_Override == 0)
+			return getAnimHash("Reaction" + _animHitNumber.ToString()); 
+		else
+			return getAnimHash("Reaction" + Loco.ReactionAnimID_Override.ToString()); 
+	}
+
+
+
+	public override int getReactionAnimID(int combo, eHitType hitType)
+	{
+		if(combo == 0) //jks HACK: safty check
+			combo = 1;
+		
+		int reactionChoice;
+		
+		if (hitType == eHitType.HT_CRITICAL)
+		{
+			//reactionChoice = Random.Range(4, 6);  //jks critical reaction only
+			float randomNum = Utility.GetRandom_0_1();
+			if (randomNum < 0.33f) reactionChoice = 4;
+			else if (randomNum < 0.66f) reactionChoice = 5;
+			else reactionChoice = 6;
+			
+		}
+		else if (hitType == eHitType.HT_MISS || hitType == eHitType.HT_BAD)
+		{   //jks protect motion
+			return _anim_protect; //jks     reactionChoice = 3;  //jks block reaction only
+		}
+		else 
+		{
+			//reactionChoice = Random.Range(0, 2);
+			float randomNum = Utility.GetRandom_0_1();
+			if (randomNum < 0.33f) reactionChoice = 0;
+			else if (randomNum < 0.66f) reactionChoice = 1;
+			else reactionChoice = 2;
+		}
+		
+		//Log.jprint(gameObject + "   reaction choice: "+ reactionChoice + "     reaciton anim #: "+ _anim_reaction[combo-1,reactionChoice]);
+		
+		return _anim_reaction[combo-1,reactionChoice]; //jks index 0 == combo1, index 1 == combo2, index 2 == combo3
+	}
+
+
+
+
+//	#region Leader Buff
+//	
+//	public override int calculate_LeaderBuff_AttackPoint_Self(CardClass enemyClass)
+//	{
+//		return 0;
+//	}
+//	
+//	public override float calculate_LeaderBuff_HitRate_Self(CardClass enemyClass)
+//	{
+//		return 0;
+//	}
+//	
+//	#endregion
+//	
+	//jks 2015.5.8 remove leader strategy-		
+//	#region Leader Strategy
+//	
+//	
+//	public override int calculate_LeaderStrategy_AttackPoint()
+//	{
+//		return 0;
+//	}
+//	
+//	public override float calculate_LeaderStrategy_HitRate()
+//	{
+//		return 0;
+//	}
+//	
+//	#endregion
+
+
+
+}
