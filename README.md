@@ -11,7 +11,7 @@ Additional samples will be included in the near future.
 Contributions from the **Custom Digital Twin** project built at Walmart Innovation Lab (Project Archer).  
 
 
-### 2. Tower of God (Mobile RPG)
+### 2. Tower of God (Mobile ARPG)
 Contributions from the **Tower of God** mobile action RPG project developed at Raiz.  
 Focus areas:
 - Client-side **combat gameplay system** ownership
